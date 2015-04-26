@@ -128,3 +128,9 @@
         wait: yes
         wait_timeout: 900
       register: rds
+
+- hosts: ghost
+  remote_user: ubuntu
+  sudo: yes
+  roles:
+    - common

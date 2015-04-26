@@ -1,0 +1,33 @@
+---
+- name: Set hostname
+  shell: echo "{{ hostname }}" > /etc/hostname && hostname -F /etc/hostname
+
+- name: Update /etc/hosts
+  template: src=hosts dest=/etc/hosts
+
+- name: Set timezone
+  shell: echo "{{ location }}" > /etc/timezone && dpkg-reconfigure -f noninteractive tzdata
+
+- name: Install software updates
+  apt: update_cache=yes
+
+- name: Disable root login
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^PermitRootLogin without-password"
+    line: "PermitRootLogin no"
+
+- name: Allow SSH connection
+  ufw: rule=limit port=ssh proto=tcp
+
+- name: Allow HTTP, HTTPS and SSH connections
+  ufw: rule=allow port={{ item }} proto=tcp
+  with_items:
+    - http
+    - https
+
+- name: Enable UFW
+  ufw: state=enabled
+
+- name: Install fail2ban
+  apt: name=fail2ban
