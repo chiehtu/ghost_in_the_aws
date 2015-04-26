@@ -1,0 +1,52 @@
+---
+- name: Install Git, Node.js and Supervisor
+  apt: name={{ item }}
+  with_items:
+    - git
+    - nodejs
+    - nodejs-legacy
+    - supervisor
+
+- name: Install npm
+  shell: curl -L https://www.npmjs.com/install.sh | sh
+
+- name: Clone Ghost
+  git:
+    repo: https://github.com/TryGhost/Ghost.git
+    dest: /var/www/ghost
+    version: stable
+
+- name: Add group "ghost"
+  group: name=ghost
+
+- name: Add user "ghost"
+  user: name=ghost group=ghost
+
+- name: Copy Ghost configuration
+  template: src=config.js dest=/var/www/ghost/config.js
+
+- name: Install Grunt
+  npm: name=grunt-cli global=yes
+
+- name: Install server dependencies
+  npm: path=/var/www/ghost state=present
+
+- name: Install client dependencies
+  command: grunt init chdir=/var/www/ghost
+
+- name: Build the minified assets used in production
+  command: grunt prod chdir=/var/www/ghost
+
+- name: Change ownership
+  file:
+    path: /var/www/ghost
+    owner: ghost
+    group: ghost
+    state: directory
+    recurse: yes
+
+- name: Copy startup script
+  copy: src=ghost.conf dest=/etc/supervisor/conf.d/ghost.conf
+  notify:
+    - restart supervisor
+    - restart nginx
