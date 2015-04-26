@@ -6,3 +6,7 @@ region: ap-northeast-1
 ec2_instance_type: t2.micro
 db_username:
 db_password:
+ssl_certificate: ~/.ssh/ghost.crt
+ssl_certificate_key: ~/.ssh/ghost.key
+ssl_dhparam: ~/.ssh/dhparam.pem
+ssl_trusted_certificate: ~/.ssh/trusted_certificate.pem
