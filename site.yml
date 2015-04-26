@@ -1,0 +1,130 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: False
+  tasks:
+    - name: Create key pair
+      ec2_key:
+        name: ghost
+        region: "{{ region }}"
+      register: ec2_key
+
+    - name: Create private key
+      shell: echo -e "{{ item.value.private_key }}" > ~/.ssh/ghost.pem
+      with_dict: ec2_key
+      when: item.value.private_key is defined
+
+    - name: Change key permissions
+      file: path=~/.ssh/ghost.pem mode=0600
+
+    - name: Create VPC
+      ec2_vpc:
+        state: present
+        cidr_block: 172.16.0.0/16
+        region: "{{ region }}"
+        resource_tags: {"Name":"Ghost"}
+        internet_gateway: yes
+        subnets:
+          - cidr: 172.16.1.0/24
+            az: "{{ region }}a"
+          - cidr: 172.16.2.0/24
+            az: "{{ region }}c"
+        route_tables:
+          - subnets:
+              - 172.16.1.0/24
+              - 172.16.2.0/24
+            routes:
+              - dest: 0.0.0.0/0
+                gw: igw
+
+      register: ec2_vpc
+
+    - name: Create security group of web server
+      ec2_group:
+        name: web_server
+        description: Security group of web server
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: 0.0.0.0/0
+          - proto: tcp
+            from_port: 80
+            to_port: 80
+            cidr_ip: 0.0.0.0/0
+          - proto: tcp
+            from_port: 443
+            to_port: 443
+            cidr_ip: 0.0.0.0/0
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+        vpc_id: "{{ ec2_vpc.vpc_id }}"
+      register: sg_web
+
+    - name: Launch instance
+      ec2:
+        key_name: ghost
+        group: web_server
+        instance_type: t2.micro
+        image: ami-936d9d93
+        region: "{{ region }}"
+        vpc_subnet_id: "{{ ec2_vpc.subnets[0].id }}"
+        wait: yes
+      register: ec2
+
+    - name: Allocate a new elastic IP and associate it with an instance
+      ec2_eip: instance_id={{ item.id }} region={{ region }}
+      with_items: ec2.instances
+      register: eip
+
+    - name: Add new instance to host group
+      add_host:
+        groupname: ghost
+        name: "{{ eip.results[0].public_ip }}"
+        ansible_ssh_private_key_file: ~/.ssh/ghost.pem
+
+    - name: Create security group of database
+      ec2_group:
+        name: db_server
+        description: Security group of database
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            from_port: 5432
+            to_port: 5432
+            group_name: web_server
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+        vpc_id: "{{ ec2_vpc.vpc_id }}"
+      register: sg_db
+
+    - name: Create DB subnet group
+      rds_subnet_group:
+        state: present
+        name: pg_subnet_group
+        description: Subnet group of PostgreSQL
+        region: "{{ region }}"
+        subnets:
+          - "{{ ec2_vpc.subnets[0].id }}"
+          - "{{ ec2_vpc.subnets[1].id }}"
+
+    - name: Launch DB instance
+      rds:
+        command: create
+        instance_type: db.t2.micro
+        instance_name: postgresql-94
+        db_engine: postgres
+        engine_version: 9.4.1
+        size: 20
+        username: "{{ db_username }}"
+        password: "{{ db_password }}"
+        db_name: ghost
+        region: "{{ region }}"
+        subnet: pg_subnet_group
+        vpc_security_groups: "{{ sg_db.group_id }}"
+        wait: yes
+        wait_timeout: 900
+      register: rds
